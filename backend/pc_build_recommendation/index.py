@@ -5,15 +5,15 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize Bedrock client
-bedrock_runtime = boto3.client('bedrock-runtime', region_name='ap-southeast-1')
+# Initialize Bedrock client for your region
+bedrock_runtime = boto3.client('bedrock-runtime')
 
 # Bedrock model ID
-MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0-20260217-v1:0'
+MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0-20260217-v1:0'
 
 
 def build_prompt(budget, currency, use_case):
-    """Build the prompt for Bedrock"""
+    """Build the PC build recommendation prompt"""
     return f"""You are an expert PC builder with deep knowledge of hardware compatibility, price-to-performance ratios, and component availability. A user wants to build a PC with a budget of {budget} {currency} for the following primary use case: {use_case}.
 
 Generate a complete, detailed PC build recommendation tailored to their budget and use case. Structure your response as follows:
@@ -49,69 +49,41 @@ For each component listed below, provide the specific model name, approximate pr
 Be specific with model names and realistic with current market pricing in the specified currency. Adjust component recommendations based on regional availability and pricing differences for the selected currency. If the budget is tight, prioritize the components that matter most for the use case."""
 
 
-def generate_response(budget, currency, use_case):
-    """Generate PC build recommendation from Bedrock"""
-    prompt = build_prompt(budget, currency, use_case)
-
-    # Build the messages for Claude
-    messages = [
-        {
-            'role': 'user',
-            'content': prompt
-        }
-    ]
-
-    # Invoke model
-    try:
-        response = bedrock_runtime.invoke_model(
-            modelId=MODEL_ID,
-            messages=messages,
-            system="You are a helpful PC hardware expert providing detailed build recommendations."
-        )
-
-        # Parse response
-        response_body = json.loads(response['body'].read())
-        return response_body['content'][0]['text']
-    except Exception as e:
-        logger.error(f"Bedrock error: {str(e)}")
-        return f"Error generating recommendation: {str(e)}"
-
-
 def lambda_handler(event, context):
-    """Main Lambda handler"""
-    logger.info(f"Received event: {json.dumps(event)}")
+    """Main Lambda handler for PC Build Advisor"""
+    logger.info(f"Event: {json.dumps(event)}")
     
-    # Handle CORS preflight
+    # CORS headers
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST,OPTIONS',
+        'Content-Type': 'application/json'
+    }
+    
+    # Handle OPTIONS preflight
     if event.get('requestContext', {}).get('http', {}).get('method') == 'OPTIONS':
         return {
             'statusCode': 200,
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS',
-            },
+            'headers': cors_headers,
             'body': ''
         }
     
     try:
-        # Parse request body
+        # Parse request
         body = json.loads(event.get('body', '{}'))
-        
         budget = body.get('budget')
         currency = body.get('currency', 'USD')
         use_case = body.get('use_case', 'General Use')
         
+        # Validate budget
         if not budget:
             return {
                 'statusCode': 400,
-                'headers': {
-                    'Access-Control-Allow-Origin': '*',
-                    'Content-Type': 'application/json',
-                },
+                'headers': cors_headers,
                 'body': json.dumps({'error': 'Missing budget parameter'})
             }
         
-        # Validate inputs
         try:
             budget = int(budget)
             if budget < 500 or budget > 100000:
@@ -119,25 +91,39 @@ def lambda_handler(event, context):
         except (ValueError, TypeError):
             budget = 2500
         
-        # Generate recommendation
-        recommendation = generate_response(budget, currency, use_case)
+        logger.info(f"Generating recommendation: Budget={budget}, Currency={currency}, UseCase={use_case}")
+        
+        # Call Bedrock
+        prompt = build_prompt(budget, currency, use_case)
+        
+        response = bedrock_runtime.invoke_model(
+            modelId=MODEL_ID,
+            body=json.dumps({
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'system': 'You are a helpful PC hardware expert providing detailed build recommendations.',
+                'max_tokens': 2048
+            })
+        )
+        
+        # Parse Bedrock response
+        response_body = json.loads(response['body'].read())
+        recommendation = response_body['content'][0]['text']
         
         return {
             'statusCode': 200,
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'text/plain; charset=utf-8',
-            },
+            'headers': cors_headers,
             'body': recommendation
         }
     
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Error: {str(e)}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'application/json',
-            },
+            'headers': cors_headers,
             'body': json.dumps({'error': f'Internal Server Error: {str(e)}'})
         }
