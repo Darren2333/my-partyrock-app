@@ -506,7 +506,7 @@
             return html;
         }
 
-        // Stream handler
+        // Response handler - simulates streaming by breaking text into chunks
         async function streamResponse(url, outputElementId, spinnerId, errorElementId) {
             const outputEl = document.getElementById(outputElementId);
             const spinnerEl = document.getElementById(spinnerId);
@@ -536,74 +536,32 @@
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let currentLine = null;
+                // Get full response text
+                const text = await response.text();
+                spinnerEl.style.display = 'none';
 
-                while (true) {
-                    const { done, value } = await reader.read();
+                // Split by paragraphs and animate display
+                const paragraphs = text.split('\n\n').filter(p => p.trim());
+                
+                for (const para of paragraphs) {
+                    const lines = para.split('\n').filter(l => l.trim());
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            // Render markdown and create new line
+                            const mdHtml = renderMarkdown(line);
+                            const lineEl = document.createElement('span');
+                            lineEl.className = 'md-line';
+                            lineEl.innerHTML = mdHtml;
+                            outputEl.appendChild(lineEl);
 
-                    if (value) {
-                        const text = decoder.decode(value, { stream: true });
-                        buffer += text;
-
-                        // Process complete lines
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || '';
-
-                        for (const line of lines) {
-                            if (line.trim()) {
-                                // Remove cursor from previous line
-                                if (currentLine) {
-                                    currentLine.innerHTML = currentLine.innerHTML.replace(/<span class="cursor"><\/span>$/, '');
-                                }
-
-                                // Render markdown and create new line
-                                const mdHtml = renderMarkdown(line);
-                                currentLine = document.createElement('span');
-                                currentLine.className = 'md-line';
-                                currentLine.innerHTML = mdHtml;
-                                outputEl.appendChild(currentLine);
-
-                                // Auto-scroll
-                                outputEl.scrollTop = outputEl.scrollHeight;
-                            }
-                        }
-
-                        // Add cursor to buffer
-                        if (buffer.trim()) {
-                            if (!currentLine) {
-                                currentLine = document.createElement('span');
-                                currentLine.className = 'md-line';
-                                outputEl.appendChild(currentLine);
-                            }
-                            const mdHtml = renderMarkdown(buffer);
-                            currentLine.innerHTML = mdHtml + '<span class="cursor"></span>';
+                            // Auto-scroll
                             outputEl.scrollTop = outputEl.scrollHeight;
+                            
+                            // Small delay between lines for visual effect
+                            await new Promise(r => setTimeout(r, 10));
                         }
-                    }
-
-                    if (done) {
-                        // Flush final buffer
-                        if (buffer.trim()) {
-                            const mdHtml = renderMarkdown(buffer);
-                            const finalLine = document.createElement('span');
-                            finalLine.className = 'md-line';
-                            finalLine.innerHTML = mdHtml;
-                            outputEl.appendChild(finalLine);
-                        }
-
-                        // Remove cursor
-                        if (currentLine) {
-                            currentLine.innerHTML = currentLine.innerHTML.replace(/<span class="cursor"><\/span>$/, '');
-                        }
-
-                        break;
                     }
                 }
-
-                spinnerEl.style.display = 'none';
             } catch (error) {
                 spinnerEl.style.display = 'none';
                 errorEl.textContent = `Error: ${error.message}`;
