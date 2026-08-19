@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: PC Build Advisor - AWS SAM Application with Lambda, API Gateway, Bedrock, and S3
+Description: PC Build Advisor - Serverless Lambda + S3 Application
 
 Globals:
   Function:
@@ -9,7 +9,7 @@ Globals:
     Runtime: python3.12
 
 Resources:
-  # IAM Role for Lambda Functions with Bedrock permissions
+  # IAM Role for Lambda with Bedrock permissions only
   AppBedrockRole:
     Type: AWS::IAM::Role
     Properties:
@@ -18,50 +18,38 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: BedrockInvokePolicy
+        - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource:
-                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0-20260217-v1:0'
-                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0-20260217-v1:0'
-                  - 'arn:aws:bedrock:::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0-20260217-v1:0'
+                Resource: arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0-20260217-v1:0
 
-  # PC Build Recommendation Lambda Function
+  # Lambda Function - PC Build Recommendation
   PCBuildRecommendationFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/pc_build_recommendation/
-      Handler: run.sh
+      Handler: index.lambda_handler
       Runtime: python3.12
       Role: !GetAtt AppBedrockRole.Arn
-      Layers:
-        - arn:aws:lambda:us-east-1:753240598075:layer:LambdaAdapterLayerX86:27
-      Environment:
-        Variables:
-          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
-          AWS_LWA_INVOKE_MODE: response_stream
-          PORT: '8080'
+      Timeout: 60
+      MemorySize: 256
       FunctionUrlConfig:
         AuthType: NONE
-        InvokeMode: RESPONSE_STREAM
 
-  # S3 Bucket for static website
+  # S3 Bucket for Frontend
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'pc-build-advisor-${AWS::AccountId}-${AWS::Region}'
+      BucketName: !Sub pc-build-advisor-${AWS::AccountId}-${AWS::Region}
       WebsiteConfiguration:
         IndexDocument: index.html
         ErrorDocument: index.html
@@ -71,30 +59,34 @@ Resources:
         IgnorePublicAcls: false
         RestrictPublicBuckets: false
 
-  # S3 Bucket Policy for public read access (fixed: use PolicyDocument)
+  # S3 Bucket Policy
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref FrontendBucket
-      PolicyDocument:
+      PolicyText:
         Version: '2012-10-17'
         Statement:
-          - Sid: PublicReadGetObject
-            Effect: Allow
-            Principal: "*"                # or: Principal: { AWS: "*" }
-            Action:
-              - s3:GetObject
-            Resource: !Sub "arn:aws:s3:::${FrontendBucket}/*"
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
 
 Outputs:
-  PCBuildRecommendationUrl:
-    Description: URL of the PC Build Recommendation Lambda Function
-    Value: !GetAtt PCBuildRecommendationFunction.FunctionUrl
+  LambdaFunctionUrl:
+    Description: Lambda Function URL for API
+    Value: !GetAtt PCBuildRecommendationFunctionUrl.FunctionUrl
+    Export:
+      Name: PCBuildAdvisorLambdaUrl
 
   WebsiteUrl:
-    Description: S3 Website URL
+    Description: Frontend Website URL
     Value: !GetAtt FrontendBucket.WebsiteURL
+    Export:
+      Name: PCBuildAdvisorWebsiteUrl
 
   BucketName:
-    Description: Frontend S3 Bucket Name
+    Description: Frontend S3 Bucket
     Value: !Ref FrontendBucket
+    Export:
+      Name: PCBuildAdvisorBucket
