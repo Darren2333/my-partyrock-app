@@ -71,24 +71,25 @@ Resources:
         IgnorePublicAcls: false
         RestrictPublicBuckets: false
 
-  # S3 Bucket Policy for public read access
+  # S3 Bucket Policy for public read access (fixed: use PolicyDocument)
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref FrontendBucket
-      PolicyText:
+      PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal: '*'
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"                # or: Principal: { AWS: "*" }
             Action:
               - s3:GetObject
-            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Resource: !Sub "arn:aws:s3:::${FrontendBucket}/*"
 
 Outputs:
   PCBuildRecommendationUrl:
     Description: URL of the PC Build Recommendation Lambda Function
-    Value: !GetAtt PCBuildRecommendationFunctionUrl.FunctionUrl
+    Value: !GetAtt PCBuildRecommendationFunction.FunctionUrl
 
   WebsiteUrl:
     Description: S3 Website URL
