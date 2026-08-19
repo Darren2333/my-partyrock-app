@@ -39,7 +39,7 @@ jobs:
           sam deploy \
             --stack-name pc-build-avisor \
             --s3-bucket ${{ secrets.SAM_DEPLOY_BUCKET }} \
-            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --capabilities CAPABILITY_IAM \
             --region ap-southeast-1 \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
@@ -47,10 +47,10 @@ jobs:
       - name: Get CloudFormation outputs
         run: |
           echo "Retrieving stack outputs..."
-          PC_BUILD_URL=$(aws cloudformation describe-stacks \
+          LAMBDA_URL=$(aws cloudformation describe-stacks \
             --stack-name pc-build-avisor \
             --region ap-southeast-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='PCBuildRecommendationUrl'].OutputValue" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionUrl'].OutputValue" \
             --output text)
           
           BUCKET_NAME=$(aws cloudformation describe-stacks \
@@ -59,15 +59,15 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" \
             --output text)
           
-          echo "PC_BUILD_URL=$PC_BUILD_URL" >> $GITHUB_ENV
+          echo "LAMBDA_URL=$LAMBDA_URL" >> $GITHUB_ENV
           echo "BUCKET_NAME=$BUCKET_NAME" >> $GITHUB_ENV
           
-          echo "PC Build URL: $PC_BUILD_URL"
+          echo "Lambda URL: $LAMBDA_URL"
           echo "Bucket: $BUCKET_NAME"
 
-      - name: Update frontend with Lambda URLs
+      - name: Update frontend with Lambda URL
         run: |
-          sed -i "s|__URL_PC_BUILD_RECOMMENDATION__|${{ env.PC_BUILD_URL }}|g" frontend/index.html
+          sed -i "s|__URL_PC_BUILD_RECOMMENDATION__|${{ env.LAMBDA_URL }}|g" frontend/index.html
 
       - name: Upload frontend to S3
         run: |
@@ -78,7 +78,12 @@ jobs:
       - name: Print deployment summary
         run: |
           echo "=========================================="
-          echo "Deployment Complete!"
+          echo "✓ Deployment Complete!"
           echo "=========================================="
-          echo "Website URL: $(aws cloudformation describe-stacks --stack-name pc-build-avisor --region ap-southeast-1 --query "Stacks[0].Outputs[?OutputKey=='WebsiteUrl'].OutputValue" --output text)"
+          echo "Website URL:"
+          aws cloudformation describe-stacks \
+            --stack-name pc-build-avisor \
+            --region ap-southeast-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='WebsiteUrl'].OutputValue" \
+            --output text
           echo "=========================================="
